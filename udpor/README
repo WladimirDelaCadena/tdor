@@ -1,0 +1,65 @@
+
+This is the README File for Tdor a datagram based onion routing
+system.
+
+========================
+Limitations
+========================
+Currently the system 'works'(tested) on Linux 2.6 kernels
+(MIPS, x86 and x86_64 architectures) and in MacOSX 10.4 & 10.5
+(ppc and x86 architectures). Work in in progress to include
+more architectures and operating systems.
+
+The tdor network is extremely small and is controlled by
+only one individual (Camilo Viecco)  it is made of
+four to eight (4-8) hosts. There are only two running exit nodes.
+
+There are problems when running in server mode behind NAT.
+Client mode should work fine however.
+
+========
+Building tdor
+========
+Follow the INSTALL file building instructions 
+
+
+
+=====================
+Running (as clinet)
+====================
+
+The to actually run the system, as root do:
+ $tdor -c -z nobody 
+
+This will create a virtual interface with local ip 10.4.0.2, connected
+to a remote host at 10.4.0.1.
+
+Set your application to use a socks proxy of type socks4/4a at host
+10.4.0.1 in port 1080.
+
+The -z option is to change user to user nobody. This is highly recommended
+
+That is it!
+
+
+
+=====================================
+
+===============
+WARNING
+===============
+
+This system is under heavy development and this somewhat unstable, if at any
+moment, you loose connectivity as client do:
+1. kill your tdor program
+2. Wait 40 seconds
+3. Restart the tdor program with the same paramenters.
+
+That should to the trick!
+
+
+
+
+
+
+

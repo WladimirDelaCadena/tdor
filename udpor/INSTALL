@@ -1,0 +1,109 @@
+
+This is the INSTALL File for Tdor a datagram based onion routing
+system.
+
+========================
+Limitations
+========================
+Currently the system 'works'(tested) on Linux 2.6 kernels
+(MIPS, x86 and x86_64 architectures) and in MacOSX 10.4 & 10.5 
+(ppc and x86 architectures). Work in in progress to include
+more architectures and operating systems.
+
+The tdor network is extremely small and is controlled by
+only one individual (Camilo Viecco)  it is made of
+four(4-8) hosts. There are only two running exit nodes. 
+
+=====================
+Prerequisites:
+====================
+Tdor requires openssl, libcurl and libdnet to compile, build and run.
+And a running compiler!.
+
+For RHEL(and CENTOS):
+openssl and curl come with the distribution (yum install or up2date install)
+However libdnet does not, you can download it and build it OR you
+can use the rpmforge repo and (yum install) it.
+Dont forget to also install the devel components of the libraries.
+(In rpm lingua openssl-devel and libdnet-devel).
+
+For Ubuntu/Debian:
+apt get has repositories for: oflib6-dev,libssl-dev,libcurl4-openssl-dev.
+The bad news is that debian mispacked libdnet (and renamed it) so the
+apt version does not work. Any libdnet versiion >=1.11 should work.
+
+
+For OSX:
+You need the tun-tap device for OSX, that is avaialbe here:
+http://tuntaposx.sourceforge.net/.
+OSX comes with openssl and libcurl, but not libdnet.
+So to install libdnet there are two options:
+1. download the source and install
+2. use 'Macports' to install libdnet.
+
+(Make sure you have a running compiler on your system if not
+dowload Xcode.)
+
+
+
+=======================
+Building (Linux)
+======================
+
+Ok, we follow the traditional:
+
+./configure
+./make
+
+(optional and NOT recommended)./make install
+
+ 
+===================
+Building OSX
+===================
+Depending on what method you used to install libdnet
+the configure system may not be able to locate the libdnet
+libraries.  
+
+So:
+
+./configure
+
+And if configure complaints add the --with-libdnet-libraries=XX and 
+--with-libdnet-include=YY options with the appropiate location of libdnet.
+
+Now we can do:
+
+./make
+
+(optional and NOT recommended)./make install
+
+
+=====================
+Running (as clinet)
+====================
+
+The to actually run the system, as root do:
+ $./tdor -c 
+
+This will create a virtual interface with local ip 10.4.0.2, connected
+to a remote host at 10.4.0.1. 
+
+Set your applications to use a socks proxy of type socks4/4a at host 
+10.4.0.1 in port 1080.
+
+That is it!
+
+
+====================
+Things to do:
+====================
+There are warnings during build on OSX and linux x86_64,
+these should be removed by the next iteration.
+
+
+====================
+
+
+
+

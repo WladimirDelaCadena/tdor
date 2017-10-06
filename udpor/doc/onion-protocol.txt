@@ -1,0 +1,150 @@
+
+This document contains the onion protocol for TDOR
+
+This is the documentation for protocol version 1.0
+
+MOTIVATION:
+
+As the transport mechanism for TDOR is inherently unreliable. The onion 
+routing protocol, that is the commands issued between peers in the Tdor 
+system, must be aware of this. Also,each cell header must be self contained, 
+in the sense that it must be able to be decrypted and verified independently 
+once a circuit has been established.
+
+
+PARAMETERS:
+
+All fields are in network byte order.
+For ephemeral keys we use use a 512 bit Diffie-Hellman key excange with the
+following parameters (expressed as c strings):
+
+        static unsigned char dh512_p[]={
+                0xFF,0x61,0x71,0x3C,0x3E,0xA5,0x52,0x0B,0x49,0x20,0xCB,0x7A,
+                0x0D,0xF9,0x7E,0xF1,0x0F,0x2D,0xA3,0x72,0x21,0xAF,0xF8,0xBE,
+                0xBD,0x1D,0x8D,0xD4,0x78,0x5C,0x4D,0x4E,0x7D,0x11,0xC6,0x81,
+                0x17,0x54,0x6B,0x9D,0xC2,0xB4,0x32,0xD4,0x56,0x78,0x94,0xDA,
+                0xB0,0x1D,0x82,0xE6,0xF9,0xF1,0x88,0x1A,0x6B,0xEE,0x0A,0x76,
+                0x25,0x22,0x72,0xC3,
+                };
+        static unsigned char dh512_g[]={
+                0x05,
+                };
+
+The public keys are 1024 bit RSA keys. The preferred exponent is RSA_F4.
+The symmetric key algorithm is AES with 128 bit key size.
+The cryptographic hash algorithm is SHA1.
+
+For link encrption, we use Camilo Viecco's crappy link encryption (CVCLE).
+(I know this needs to change) 
+
+
+TDOR CELLS:
+
+Each Tdor Cell has a 24 byte header as follows:
+                                    
+    0                   1                   2                   3   
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Version| Size  |             Circuit id                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Reserved                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Initialization Vector                      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Initialization Vector (cont)               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Checksum                                   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Checksum (cont)            | Com   |Status |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Cell Payload                           |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                            Cell Header Format
+
+          Note that one tick mark represents one bit position.
+
+                               Figure 1.
+
+Version:
+   4 bits.
+   The current version of the protocol this MUST be 1.
+
+Size:
+   4 bits:
+   The total size of the Cell, in 128 byte blocks. The total size
+   for cells is at maximum 1024 bytes.  Thus the value of this field
+   MUST be between 1 and 8 inclusive. Systems using this protocol
+   SHOULD use only two cell sizes: sizes 128 and 1024.
+
+Circuit_id:
+    24 bits.
+    A unique identifier for a circuit in the path. 
+
+Reserved:
+   32 bits.
+   Currently blank field for aligment of the symmetric algorithm.
+
+Initialization vector:
+   64 bits.
+   Initialization vector for the contents for the opaque sections of the
+   cell, including checksum, command and command status. It must be different
+   for each cell sent. It SHOULD be increased by one per each packet sent.
+
+Checksum:
+   56 bits.
+   The first 56 bits of the SHA1 data of the unencrypted payload of the cell.
+   It should be opaque!
+
+Command:
+   4 bits: 
+   The command type of the circuit. It must be one of the following types:
+      COMMAND_PADDING       0
+      COMMAND_CONNECT       1
+      COMMAND_CREATE        2
+      COMMAND_RELAY_COMMAND 3
+      COMMAND_DESTROY       4
+      COMMAND_STREAM_DATA   5 
+
+Command Status	
+   4 bits:
+   The command status for the type of message sent. It must be one of the
+   followind status.
+      STATUS_REQUEST        0
+      STATUS_OK             1
+      STATUS_ACK            2
+      STATUS_LATER          3
+      STATUS_DENIED         4
+   
+
+Other headers/structs:
+
+
+
+TDOR CIRCUITS:
+
+To connect to a server a client connects using to the server in the appropiate 
+port. After this this client MUST send a command connect cell message with 
+status request. This cell payload MUST have a dh_hello struct defined as 
+follow:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |       Key Size                |        Encrypted Len          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | Extra type    | Extra len     |         Pub Key               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Pub key (...)                          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                            Dh Hello struct 
+
+
+
+
+
+Tdor STREAMS:
+
+
+

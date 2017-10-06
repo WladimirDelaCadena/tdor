@@ -1,0 +1,15 @@
+--- src/tun-linux.c	2005-09-11 21:18:06.000000000 -0500
++++ /home/cviecco/tun-linux.c	2008-03-06 16:56:55.000000000 -0500
+@@ -79,10 +79,10 @@
+ tun_send(tun_t *tun, const void *buf, size_t size)
+ {
+ 	struct iovec iov[2];
+-	uint32_t type = ETH_TYPE_IP;
++	uint32_t type = htonl(ETH_TYPE_IP);
+ 	
+ 	iov[0].iov_base = &type;
+-	iov[0].iov_len = sizeof(type);
++	iov[0].iov_len = sizeof(uint32_t);
+ 	iov[1].iov_base = (void *)buf;
+ 	iov[1].iov_len = size;
+ 	

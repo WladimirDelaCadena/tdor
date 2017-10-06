@@ -1,0 +1,500 @@
+/*
+**  (C) 2007-2008 Camilo Viecco.  All rights reserved.
+**
+**  This file is part of Tdor, and is subject to the license terms in the
+**  LICENSE file, found in the top level directory of this distribution. If you
+**  did not receive the LICENSE file with this file, you may obtain it by
+**  contacting the authors listed above. No part of Tdor, including this file,
+**  may be copied, modified, propagated, or distributed except according to the
+**  terms described in the LICENSE file.
+*/
+
+#include <stdio.h>
+#include "tor-udp.h"
+#include <dnet.h>
+#include <unistd.h>
+#include <string.h>
+#include "dh_params.h"
+#include <stdlib.h>
+#include <sys/select.h>
+#include "link_conn.h"
+#include "internal_db.h"
+#include "cell_handler.h"
+#include "udp_transport.h"
+#include "tun_handler.h"
+#include "local_circuit_builder.h"
+#include "util.h"
+#include "ds_comm.h"
+#include "file_conf.h"
+
+#include <sys/time.h>
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <pthread.h>
+#include <errno.h>
+#include <pwd.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <signal.h>
+
+#define DEFAULT_NET_ADDR "10.4.0.0"
+
+//------ugly globals
+global_conf_t global_conf;
+conn_db_t conn_db;
+stream_db_t stream_db;
+pthread_t circuit_builder_thread;
+pthread_t server_status_thread;
+bw_queue_state_t output_queue;
+char *default_conf_filename="or.conf";
+
+//----------------now actual functions!!
+void sigint_handler(){
+  fprintf(stderr,"got an sigint, aborting!\n");
+  exit(1);
+}
+
+
+int init_conf(){
+  memset(&global_conf,0x0,sizeof(global_conf_t));
+  global_conf.bind_port=9001;
+  global_conf.bind_ipv4=INADDR_ANY;
+  global_conf.advertised_ipv4=0;
+  snprintf(global_conf.net_addr,19,DEFAULT_NET_ADDR);
+  //fprintf(stderr,"sizeof cell_header =%d\n",sizeof(cell_header_t));
+  initialize_conn_db(&conn_db);
+  initialize_stream_db(&stream_db);
+  output_queue.size=10000;
+  output_queue.current_size=0;
+  output_queue.threshold=7000;
+  output_queue.kbps=6000;
+  global_conf.rsa_key=NULL;
+  gettimeofday(&output_queue.last_time,NULL); 
+  gettimeofday(&global_conf.current_time,NULL);
+  //save_conf_file("test.conf");
+  srand(time(NULL));
+  fprintf(stderr,"init done!\n");
+  return 0;
+}
+
+int init_conf_file(char *conf_filename,int create_conf){
+  int rvalue;
+
+
+  //load conf file or create one if needed!
+  rvalue=load_conf_file(conf_filename);
+
+  if(rvalue<0){
+      if(-1==rvalue){
+         fprintf(stderr,"configuration file not exists!\n");
+         if(create_conf==1){
+            //try to create one
+            rvalue=save_conf_file(conf_filename);
+            if(rvalue>=0){
+               rvalue=load_conf_file(conf_filename);
+            }
+         }
+      }
+      if(-2==rvalue){
+         fprintf(stderr,"bad config file, icomplete or no pkinfo!\n");
+      }
+      if(rvalue<0)
+        exit(EXIT_FAILURE);
+  }
+
+  if(0==global_conf.advertised_ipv4 && INADDR_ANY==global_conf.bind_ipv4){
+     global_conf.advertised_ipv4=guess_ipv4_addr();
+  }
+
+  fprint_pub_conf(stderr,&global_conf,&output_queue);
+  return 0;
+}
+
+
+int init_tun(){
+   struct addr src,dst;
+   struct in_addr net_addr;
+   char local_addr[24];
+   char remote_addr[24];
+   char *dest;
+
+
+   if(0==inet_aton(global_conf.net_addr,&net_addr)){
+      fprintf(stderr,"bad net address:'%s'\n",global_conf.net_addr);  
+      exit(1);
+   }
+   net_addr.s_addr=htonl(ntohl(net_addr.s_addr)+1);//blah++
+   dest=inet_ntoa(net_addr);
+   snprintf(remote_addr,23,"%s/28",dest);
+   //now a small interlude to avod some computations later
+   global_conf.default_rem_ip=ntohl(net_addr.s_addr);
+
+   net_addr.s_addr=htonl(ntohl(net_addr.s_addr)+1);
+   dest=inet_ntoa(net_addr);
+   snprintf(local_addr,23,"%s/28",dest);
+   fprintf(stdout,"rem=%s local=%s\n",remote_addr,local_addr);
+
+   //addr_aton("10.4.0.2/28",&src);
+   //addr_aton("10.4.0.1/28",&dst);
+   addr_aton(local_addr,&src);
+   addr_aton(remote_addr,&dst);
+   //the next should have been done, but apparently not!
+   src.addr_type=ADDR_TYPE_IP;
+   src.addr_bits=IP_ADDR_BITS;
+   dst.addr_type=ADDR_TYPE_IP;
+   dst.addr_bits=IP_ADDR_BITS;
+
+
+   global_conf.tun=tun_open(&src,&dst,900);
+   if (global_conf.tun==NULL){
+      fprintf(stderr,"Failed to initialie tunnel\n");
+      exit(1);
+   }
+   global_conf.tun_fd=tun_fileno(global_conf.tun);
+
+  return 0;
+}
+
+int init_server_fd(){
+  //global_conf.bind_fd=
+  struct sockaddr_in my_addr;
+
+  //fprintf(stderr,"%u\n",global_conf.bind_ipv4 );
+
+
+  if ((global_conf.bind_fd = socket(PF_INET, SOCK_DGRAM, 0)) == -1) {
+     perror("socket");
+     exit(1);
+     }
+  my_addr.sin_family = AF_INET;         // host byte order
+  my_addr.sin_port = htons(global_conf.bind_port); // short, network byte order
+  my_addr.sin_addr.s_addr = htonl(global_conf.bind_ipv4); //INADDR_ANY; // automatically fill with my IP
+  //my_addr.sin_addr.s_addr = global_conf.local_ip;
+  memset(&(my_addr.sin_zero), '\0', 8); // zero the rest of the struct
+  if (bind(global_conf.bind_fd, (struct sockaddr *)&my_addr,
+           sizeof(struct sockaddr)) == -1) {
+     perror("bind");
+     exit(1);
+     }
+
+  return 0;
+};
+
+int handle_udp_packet(int fd){
+   static unsigned char in_buffer[MAX_LINK_PACKET_SIZE];
+   
+   struct sockaddr_in their_addr; 
+   socklen_t addr_len;
+   int numbytes;   
+
+   addr_len = sizeof their_addr;
+   if ((numbytes = recvfrom(fd, in_buffer, MAX_LINK_PACKET_SIZE , 0,
+        (struct sockaddr *)&their_addr, &addr_len)) == -1) {
+        perror("recvfrom");
+        exit(1);
+   }  
+   return handle_link_packet(in_buffer,
+                             numbytes,
+                             ntohl(their_addr.sin_addr.s_addr),
+                             ntohs(their_addr.sin_port)); 
+   //return 0;
+}
+
+
+//demo, use single udp socket!
+//this function never ends
+
+int server_loop(){
+  //assumes fd for both server and tunnel are ready
+  int max_fd;
+  fd_set rfds;
+  struct timeval tv;
+  int retval;
+  int i;
+  time_t last_del_time=0;
+  time_t last_link_time=0;
+  int num_deleted;
+  or_conn_t *conn;
+
+  max_fd=global_conf.bind_fd;
+  if((global_conf.is_client!=0 || global_conf.is_exit!=0) &&
+      global_conf.tun_fd>max_fd){
+      max_fd=global_conf.tun_fd;
+   }
+
+  fprintf(stderr,"max_fd=%d\n",max_fd);
+  //for(i=0;i<1000;i++){
+  for(i=0;i<1000;){  //"forever and ever, aleluia" (now an octave higher!)
+                     //  (hint: GFH)
+ 
+      /*This is soo unefficient!*/
+      FD_ZERO(&rfds);
+      FD_SET(global_conf.bind_fd, &rfds);
+      if(global_conf.is_client!=0 || global_conf.is_exit!=0){
+         FD_SET(global_conf.tun_fd, &rfds);
+      }
+
+
+      /* Wait up to five seconds. */
+      tv.tv_sec = 5;
+      tv.tv_usec = 0;
+
+      retval = select(max_fd+1, &rfds, NULL, NULL, &tv);
+      /* Don’t rely on the value of tv now! */
+
+      if (retval == -1){
+         perror("select()");
+         if(errno!=EINTR){
+             exit(1);
+             }
+         }
+
+      //always get current time!
+      gettimeofday(&global_conf.current_time,NULL);
+      if (retval>0){
+         //printf("Data is available now.\n");
+         /* FD_ISSET(0, &rfds) will be true. */
+         //gettimeofday(&global_conf.current_time,NULL);
+
+         //test for bind
+         if (FD_ISSET(global_conf.bind_fd, &rfds)){
+            handle_udp_packet(global_conf.bind_fd);
+            }
+         //test for tun if client or exit
+         if(global_conf.is_client!=0 || global_conf.is_exit!=0){
+            if(FD_ISSET(global_conf.tun_fd, &rfds)){
+                handle_tunnel_packet(global_conf.tun);
+                }
+            //and delete old streams
+            if(last_del_time!=global_conf.current_time.tv_sec){
+                num_deleted=delete_old_streams(&stream_db,20);
+                if(num_deleted!=0){
+                   fprintf(stderr,"num_deleted=%d\n",num_deleted);
+                   }
+                last_del_time=global_conf.current_time.tv_sec;
+                }
+            }
+
+         }
+      else{
+         fprintf(stderr,"{");
+         }
+      //now stuff that always happens:
+      //     1. random keep alives
+      //     2. cleanup of unresponsive links?
+      if(last_link_time+2<global_conf.current_time.tv_sec){
+          conn=select_random_inactive_conn(&conn_db,global_conf.current_time.tv_sec);
+          if(NULL!=conn){
+             send_link_state_packet(conn,LINK_PK_TYPE_ECHO_REQUEST);
+             fprintf(stderr,"+");
+          }
+          delete_old_circuits(&conn_db, 10);
+          last_link_time=global_conf.current_time.tv_sec;
+          delete_random_inactive_conn( &conn_db,global_conf.current_time.tv_sec);
+      }
+  }
+  //we should not reach this
+  return -1; 
+}
+
+int usage(){
+   fprintf(stdout,"tdor: The datagram onion router (version %s), usage:\n", VERSION);
+   fprintf(stdout,"tdor [-D] [-p NUM] [-k NUM] [-c] [-e] [-h] [-a ADDR] [-b ADDR][-z USR]\n ");
+   fprintf(stdout,"-p NUM\t Bind to port number NUM\n");
+   fprintf(stdout,"-k NUM\t Set maximum trhoughput to NUM kbps (experimental)\n");
+   fprintf(stdout,"-a ADDR\t Set network for vtun equal to (default 10.4.0.0) \n");
+   fprintf(stdout,"-b ADDR\t Set ip address to bind  (default ANY_ADDR) \n");
+   fprintf(stdout,"-z USR\t Change user to USR after init.\n");
+   fprintf(stdout,"-e \t Run as exit node\n");
+   fprintf(stdout,"-c \t Run in client mode\n");
+   fprintf(stdout,"-D \t Demonize\n");
+
+   return 0;   
+}
+
+
+int main(int argc, char **argv){
+  int32_t r;
+  //char *outfilename;
+  char *conf_filename=default_conf_filename;
+  int rvalue;
+  int create_conf=0;
+  char *run_username=NULL;
+  struct passwd *pw;
+  uint32_t deamonize=0;
+  int log_fd;
+  char *bind_addr=NULL;
+  char *log_filename="tdor.log";
+  pid_t pid, sid;
+  struct in_addr my_addr;
+
+
+  //set signal handlers
+ if (signal(SIGINT, sigint_handler) == SIG_ERR) {
+      fprintf(stderr,"signal");
+      exit(1);
+ }
+
+
+  //mtrace();
+  //initialize libs
+  init_conf();
+
+  //initialize defaults
+  init_ds_comm();
+  fprintf(stderr,"curl initialized\n");
+  //
+    
+   
+  //parse options
+  while ((r = getopt(argc, argv, "C:p:a:b:z:k:hecwD")) != -1){
+      switch(r){
+        case 'C': conf_filename=optarg; break;
+        case 'z': run_username=optarg; break;
+        case 'w': create_conf=1; break;
+        case 'e': global_conf.is_exit=1;   break;
+        case 'c': global_conf.is_client=1; break;
+        case 'p': global_conf.bind_port=atoi(optarg); break;
+        case 'k': output_queue.kbps=atoi(optarg); break;
+        case 'a': snprintf(global_conf.net_addr,19,"%s",optarg); break;
+        case 'b': bind_addr=optarg;break;
+        case 'D': deamonize=1; break;
+        case 'h': usage();exit(1);
+        }
+    }
+  //now process options
+  if(NULL!=bind_addr){
+      inet_aton(bind_addr,&my_addr);
+      global_conf.bind_ipv4=ntohl(my_addr.s_addr); 
+  }
+  if(0==global_conf.advertised_ipv4 && (INADDR_ANY!=global_conf.bind_ipv4 || 0!=global_conf.bind_ipv4)){
+      global_conf.advertised_ipv4=global_conf.bind_ipv4;
+  }
+
+  
+  //load conf file or create one if needed!
+  init_conf_file(conf_filename,create_conf | global_conf.is_client);
+
+  //now try to deamonize!
+  //now daemonize!
+   if(1==deamonize){
+      pid=fork();
+      if(pid<0){
+          fprintf(stderr, "Demonization requested,"
+                          " but cant Deamonize(error on fork)."
+                          " Aborting execution\n");
+          exit(EXIT_FAILURE);
+      }
+      if(pid>0){
+            //this is the parent!
+          /*if (signal(SIGCHLD, parent_sig_handler) == SIG_ERR) {
+                perror("signal");
+                exit(EXIT_FAILURE);
+          }*/
+          sleep(1);
+          //fprintf(stdout, "looks like initialization was a success\n");
+          exit(EXIT_SUCCESS);
+
+      }
+      //this is the child
+      sid=setsid();
+      if (sid < 0) {
+          fprintf(stderr, "Demonization requested,"
+                         " but cant Deamonize(error on setsid)."
+                         " Aborting execution\n");
+
+          exit(EXIT_FAILURE);
+      }
+      //maybe redirect output to a log?
+      //close(2);
+      //close(1);
+      if(NULL!=log_filename){
+         log_fd=open(log_filename, O_WRONLY|O_CREAT |O_TRUNC, (S_IRUSR | S_IWUSR | S_IRGRP|S_IROTH ) );
+         if(0>log_fd){perror("Cannot open deamon log file");exit(EXIT_FAILURE);}
+         //redirect stderr and stout and redirect to log file
+         dup2(log_fd,2);
+         dup2(log_fd,1);
+         //close(log_fd);
+      }
+
+   }  
+
+
+/*
+  rvalue=load_conf_file(conf_filename);
+  if(0==global_conf.advertised_ipv4){
+     global.advertised_ipv4=guess_ipv4_addr();
+  }
+  
+
+
+  if(rvalue<0){
+      if(-1==rvalue){
+         fprintf(stderr,"configuration file not exists!\n");
+         if(create_conf==1){
+            //try to create one
+            rvalue=save_conf_file(conf_filename);
+         }
+      }
+      if(-2==rvalue){
+         fprintf(stderr,"bad config file, icomplete or no pkinfo!\n");
+      }
+      exit(EXIT_FAILURE);
+  }
+ */
+
+  init_server_fd();
+  if(global_conf.is_client!=0 || global_conf.is_exit!=0){
+     init_tun();
+     }
+
+  ///drop goes priviledges here!
+   //input is done, try to change user;
+  if(NULL!=run_username){
+     if (geteuid()) {
+        fprintf(stderr, "only root can use -u.\n");
+        exit(1);
+     }
+     pw=getpwnam(run_username);
+     if(NULL==pw){
+        fprintf(stderr, "User %s not found.aborting\n",run_username);
+        exit(1);
+     }
+     if(0!=setgid(pw->pw_gid) || 0!=setuid(pw->pw_uid)){
+        perror("Could not change uid. aborting\n");
+        exit(1);
+     }
+ }
+
+
+
+
+  //start client thread
+  if(global_conf.is_client!=0 ){
+     rvalue=pthread_create(&circuit_builder_thread,NULL,client_circuit_builder,NULL);
+     if(0!=rvalue){perror("cannot create new thread for client"); exit(1);};
+     pthread_detach(circuit_builder_thread);
+     }
+  //or start server report thread
+  else{
+     //directory_server_status_updater
+     rvalue=pthread_create(&server_status_thread,NULL,directory_server_status_updater,NULL);
+     if(0!=rvalue){perror("cannot create new thread for server updates"); exit(1);};
+        pthread_detach(server_status_thread);    
+     }
+
+  //now send descriptor to directory servers
+  //upload_server_descriptor();    
+  server_loop();
+  
+
+  return 0;
+} 
+
+
+
+

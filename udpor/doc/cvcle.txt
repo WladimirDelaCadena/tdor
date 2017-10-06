@@ -1,0 +1,183 @@
+
+This document contains the link level encryption protocol CVCLE
+(Camilo Viecco's Crappy link encryption)
+
+
+This is the documentation for protocol version 1.0
+
+MOTIVATION:
+
+I needed a datagram based secure datagram based encryption system that used 
+sendto, recv_from semantics. Which DTLS does not provide.
+Also, a protocol that was very simple with each field having a maximum lenght
+defined
+
+
+PARAMETERS:
+
+All fields are in network byte order.
+For ephemeral keys we use use a 512 bit Diffie-Hellman key excange with the
+following parameters (expressed as c strings):
+
+        static unsigned char dh512_p[]={
+                0xFF,0x61,0x71,0x3C,0x3E,0xA5,0x52,0x0B,0x49,0x20,0xCB,0x7A,
+                0x0D,0xF9,0x7E,0xF1,0x0F,0x2D,0xA3,0x72,0x21,0xAF,0xF8,0xBE,
+                0xBD,0x1D,0x8D,0xD4,0x78,0x5C,0x4D,0x4E,0x7D,0x11,0xC6,0x81,
+                0x17,0x54,0x6B,0x9D,0xC2,0xB4,0x32,0xD4,0x56,0x78,0x94,0xDA,
+                0xB0,0x1D,0x82,0xE6,0xF9,0xF1,0x88,0x1A,0x6B,0xEE,0x0A,0x76,
+                0x25,0x22,0x72,0xC3,
+                };
+        static unsigned char dh512_g[]={
+                0x05,
+                };
+
+The public keys are 1024 bit RSA keys. The preferred exponent is RSA_F4.
+Encryption and decryptrion operations on public keys use
+RSA_PKCS1_OAEP_PADDING.
+The symmetric key algorithm is AES with 128 bit key size and unless specified
+otherwise we use it on CBC mode.
+The cryptographic hash algorithm is SHA1.
+HMAC operations use SHA1 as their message digest.
+
+
+HEADERS
+
+Each CVCLE Packet has a 20 byte header as follows:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Version    |     Type      |          Length               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                          Alignment                            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |             Initialization Vector/ Sequence Number            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |             Initialization Vector/ Sequence Number (cont)     |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Checksum                                   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Checksum (cont)                            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Packet Payload                         |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                            CVCLE Header Format
+
+          Note that one tick mark represents one bit position.
+
+                               Figure 1.
+
+Version:
+The current version number, MUST be 2 for this version.
+
+Type:
+One of the X types of packets for transfer
+
+Length:
+The total length of the datagram, including the header
+
+Initialization Vector/Sequence Number:
+A 64 bit number that has two uses, sequence number for the packet
+(to detect replay attacks and a fast first pass to prevent session hijacking)
+and is also used as initialization vector for the cryptographic algorithms
+uses later.
+
+Checksum:
+The first 64 bits of the SHA1 digest of the unencrypted payload.
+
+
+Other two headers are present:
+
+The Link Capabilities Header:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                 Symmetric Algorithms/ Digest                  |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                       Public Key Type                         |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Magic                                 |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                            CVCLE Link Capabilities Format
+
+          Note that one tick mark represents one bit position.
+
+                               Figure 1.
+
+
+Diffie-Hellman Header
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |         PK type               |             Pk size           |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |        DH  Key Size           |  ENC DH size  |  Extra Size   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                       DH Key                                  |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                        .. DH key is 256 byes long
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Extra                                  |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                 ..... (extra is 256 bytes long) ....
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                       Public Key                              |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                ..... (Public key reserver is 256 bytes long) ....
+
+PK type:
+An integer that determines what type of public key is being used.
+
+PK size:
+The size of the public key.
+
+DH key size:
+The total size in bytes of the DH key
+
+ENC DH size:
+the size in bytes of the encrypted section of the DH key.
+
+DH Key:
+Encoded size of the extra section.
+
+
+Public Key:
+
+Extra:
+
+
+CONNECTION ESTABLISHEMENT
+
+The connection establishement is made of 4 packet exchanges:
+First the client sends a 'Link Capabilities' header to the server
+,  the server then sends a return link_capabilites header,
+the client then sends a DH key exchange packet
+and the server sends a DH echange packet to the client.
+
+1. Client sends a Link_Capailities Packet.
+
+
+
+2. Server sends a Link Capabilities Packet.
+
+
+3. Client sends a Diffie Hellman Hello Packet.
+This packet contains a CVCLE Header followed by a Diffie-Hellman header
+The CVCLE header is filled with the following values:
+version:2
+type: DH_HELLO (3)
+length: 
+version:
+checksum:
+
+When the server receives this type of message it first:
+  1. 
+  2. Calculates the secret key by: calculating the SHA1 digest of
+     the calculated DH secret key..
+
+4. 
+

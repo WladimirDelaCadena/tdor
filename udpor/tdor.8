@@ -1,0 +1,76 @@
+.TH TDOR 8
+.SH NAME
+tdor	    \- the Datagram onion router
+.br
+.SH SYNOPSYS
+.B tdor
+.I [-c][-e][-k bandwidth][-p port][-a local_addr][-z user][-h][-w] [-C filename]
+.br
+.SH DESCRIPTION
+.PP
+.B tdor
+Tdor is a proof of concept code for a datagram based onion router. The goal
+is to provide a more fair transport mechanism for onion routers than what
+is found in implementations like Tor. 
+
+.SH OPTIONS
+.TP
+\fB-c\fR
+Run in client mode. The program will run in client mode, a connection through the first three uncommented servers in 'router_list.txt'  will be established and a network. This file is assumed to exist in the direcory where tdor is run. Running in client mode requires root priviledges as a virtual interface is created for communication.
+.TP
+\fB-e\fR
+Run in exit mode. The program will accept stream outs from connecting ORs. Assumes there is a socks server running in port 1080. Running in client mode requires root priviledges as a virtual interface is created for communication.
+.TP
+\fB-k\fR NUM
+Limit the outbound bandwidth to NUM kbps. This setting is stil problematic, for numbers larger than 1000. For clients, the recommended setting is 60000 (ie unlimited in practice). (Defaults to 200).
+.TP
+\fB-p\fR NUM
+Bind the communication udp port to port NUM.
+.TP
+\fB-a\fR ADDR
+Set the network address for network where the virtual interface will be created. (Defauts to 10.4.0.0)
+.TP
+\fB-z\fR USR
+After initialization change to user and group USR.
+.TP
+\fB-h\fR
+Print a small help
+.TP
+\fB-w\fR
+Write a new config file.
+.TP
+\fB-C\fR NAME
+Use configuration found in file NAME.
+
+.SH EXAMPLES
+To create the initial configuration file
+.br
+tdor -w
+.br
+.P
+To run as client with maximum throughput(assumes a configuration file exists in the local dir).
+.br
+tdor -c -k 60000
+
+
+
+
+.SH NOTES
+Tdor requires a correct functioning libdnet library. The source tarball
+for the distribution includes a patch to apply to libdnet 1.11 and 1.12
+for libdnet to work correctly in linux 2.6 i386 and x86_64.
+
+Tdor has been tested in linux 2.6 in both x86 and x86_64. I has been compiled
+in solaris 11 (nexenta), but has not run (problems with libdnet).
+
+Tdor is a proof of concept code program at the moment. There are several
+known problems in its protocols that might allow for a third party to
+impersonate some of the intermediate servers. Also the number of users
+is limited, by which the anonymity set is very small.
+
+.SH AUTHOR
+.B tdor
+and
+.B socksserver
+initaly written by Camilo H. Viecco from Indiana University.
+Documentation last modified on April 4, 2008.
