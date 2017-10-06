@@ -83,9 +83,9 @@ int tcp_packet_transparent_proxy_handle_forward(or_stream_t *stream, struct ip *
     }
   
     //now send the stream packet!
-    rvalue=build_tcp_stream_payload(stream,in_packet, outbuf);
-    return circuit_send_stream_payload(stream->parent_circuit,outbuf);
-
+    //rvalue=build_tcp_stream_payload(stream,in_packet, outbuf);
+    //return circuit_send_stream_payload(stream->parent_circuit,outbuf);
+    return 0;
 }
 
 
@@ -154,7 +154,7 @@ int tcp_packet_transparent_proxy_handle_reverse(or_stream_t *stream, unsigned co
             fprintf(stderr,"aftel local allocs!!\n"); 
             rvalue=build_tcp_stream_payload(stream,buf, outbuf);
             fprintf(stderr,"$");
-            rvalue =circuit_send_stream_payload(stream->parent_circuit,outbuf);        
+            //rvalue =circuit_send_stream_payload(stream->parent_circuit,outbuf);        
             fprintf(stderr,"/");
             stream->proxy_state=OR_STREAM_PROXY_STATE_SYN_ACK_RECV;
             return rvalue;

@@ -210,6 +210,7 @@ typedef struct or_circuit_st or_circuit_t;
 
 typedef struct{
    or_circuit_t *parent_circuit;
+   or_circuit_t *secondary_circuit;
    uint32_t stream_id;
    uint8_t protocol;
    uint16_t local_port;

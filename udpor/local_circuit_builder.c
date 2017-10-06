@@ -34,6 +34,7 @@
 #include <ds_comm.h>
 #include <assert.h>
 
+#define ROUTER_DB_FILENAME "router_list.txt"
 
 extern conn_db_t conn_db;
 extern global_conf_t global_conf;
@@ -147,13 +148,15 @@ int process_router_line(char *line, router_data_t *in_router){
 int load_router_db_from(char *filename){
    char line[ROUTER_LINE_MAX];
    FILE *router_file;
+   //fprintf(stderr,"router file: %s" , filename);
+
    int i=0;
    int rvalue;
-   
+
    //download router list!
    //rvalue=dowload_server_lists();
 
-   fprintf(stderr,"cannot create conn!!\n!");
+
    router_file=fopen(filename,"r");
    if(NULL==router_file){
      perror("cannot open router_db\n");
@@ -175,7 +178,8 @@ int load_router_db_from(char *filename){
 int load_router_db(){
    int rvalue=-1;
    //download router list!
-   rvalue=dowload_server_lists();
+   //rvalue=dowload_server_lists();
+   fprintf(stdout,"value r: %i",rvalue);
    if(rvalue>=0){
       rvalue=load_router_db_from("/tmp/body.out");
       }
@@ -190,7 +194,7 @@ int load_router_db(){
    return rvalue;
 }
 
-int client_select_ciruit_path(int numhops,router_data_t **path){
+int client_select_ciruit_path(int numhops,router_data_t **path, int t_circuit){
     //this is a silly selection path 
     // go linearly over the router db!!
     int i,j;
@@ -225,6 +229,7 @@ int client_select_ciruit_path(int numhops,router_data_t **path){
            }
          }
     }
+    exit_index = 3;
     path[numhops-1]=&router_db.router[exit_index];
     fprintf(stderr,"num_exits=%d, selected=%d exit_index=%d\n",num_exits,selected,exit_index);
     //now select the others
@@ -235,6 +240,15 @@ int client_select_ciruit_path(int numhops,router_data_t **path){
          path[j]=&router_db.router[selected];
        }while(path[j]==path[j+1]);       
     }
+    if (t_circuit == 0){ //building fixed primary circuit
+        path[0] = &router_db.router[1];
+	path[1] = &router_db.router[2]; 
+    }
+    if (t_circuit == 1){ //building fixed primary circuit
+        path[0] = &router_db.router[0]; 
+        path[1] = &router_db.router[4]; 
+    }
+		
     return rvalue;
 
 }
@@ -372,11 +386,16 @@ void *client_circuit_builder(void *inparam){
    // call extend on the circuit.. and wait!!
    //or_conn_t *conn;
    int rvalue;
+   int rvalue1;
+   int rvalue2;
    struct timespec delay;
-   or_circuit_t *circuit;
+   or_circuit_t *circuit_primary;
+   or_circuit_t *circuit_secondary;
    //connect_to_t connect_to;
    int i;   
-   router_data_t *router[MAX_CLIENT_CIRCUIT_HOPS];
+   router_data_t *router_prim[MAX_CLIENT_CIRCUIT_HOPS];
+   router_data_t *router_sec[MAX_CLIENT_CIRCUIT_HOPS];
+
    //char relay_cell[1024];
    //cell_header_t *cell_header;
    int build_attempt=0;
@@ -394,30 +413,27 @@ void *client_circuit_builder(void *inparam){
  
   while(1==1){
       do{
-/*
-         if(0==build_attempt){
-            rvalue=load_router_db();
-            if(rvalue<3){
-               fprintf(stderr,"Insufficient number of routers in "
-                              "the router db! only %d routers, aborting\n",rvalue);
-               exit(EXIT_FAILURE);
-            }
-         }
-*/
-         rvalue=client_select_ciruit_path(3,router);
-         if(rvalue<=0){
-            fprintf(stderr,"Error generating circuit path, will abort!\n");
+         rvalue = client_select_ciruit_path(3,router_prim,0);
+	 rvalue2 = client_select_ciruit_path(3,router_sec,1); 
+         if(rvalue<=0|| rvalue2<=0){
+            fprintf(stderr,"Error generating primary/secondary circuit path, will abort!\n");
             exit(EXIT_FAILURE);
          }
-         //now print circuit!
+         //now print PRIMARY/SECONDARY circuit!
+         fprintf(stderr,"Path of primary circuit created : \n");
          for(i=0;i<3;i++){
-            print_router_data(router[i]);
+            print_router_data(router_prim[i]);
          }
 
-         circuit=build_new_circuit(3, router);
-         if(NULL==circuit){
-           fprintf(stderr,"error building circuit will retry soon!");
-           for(i=20;i>0;i--){
+	 fprintf(stderr,"Path of secondary circuit created : \n");
+         for(i=0;i<3;i++){
+            print_router_data(router_sec[i]);
+         }
+         circuit_primary = build_new_circuit(3, router_prim);
+	 circuit_secondary = build_new_circuit(3, router_sec);
+         if(NULL==circuit_primary || NULL == circuit_secondary){
+           fprintf(stderr,"error building circuit(s) will retry soon!");
+           for(i=10;i>0;i--){
               delay.tv_sec=1;
               delay.tv_nsec=0;
               nanosleep(&delay,NULL);
@@ -429,21 +445,21 @@ void *client_circuit_builder(void *inparam){
           else{
             build_attempt=0;
           }
-       }while(NULL==circuit && build_attempt<5);
-       
-       //now do keepalives and check if there is no response!
-       do{
+       }while(NULL==circuit_primary && build_attempt<5 && NULL==circuit_secondary);
+      fprintf(stderr,"Both circuits successfully created !!!");
+      do{
           delay.tv_sec=20;
           delay.tv_nsec=30000000;
           nanosleep(&delay,NULL);
-          //send_circuit_state_packet(circuit, COMMAND_PADDING,STATUS_REQUEST,(char *)&connect_to);
-          send_circuit_state_packet(circuit, COMMAND_PADDING,STATUS_REQUEST,NULL);
+          send_circuit_state_packet(circuit_primary, COMMAND_PADDING,STATUS_REQUEST,NULL);
+          send_circuit_state_packet(circuit_secondary, COMMAND_PADDING,STATUS_REQUEST,NULL);
           delay.tv_sec=1;
           delay.tv_nsec=30000000;
           nanosleep(&delay,NULL);
-          fprintf(stderr,"last time=%d current_time=%d\n",(int)circuit->last_time,(int)global_conf.current_time.tv_sec);
+          fprintf(stderr,"last time_prim=%d current_time=%d\n",(int)circuit_primary->last_time,(int)global_conf.current_time.tv_sec);
 
-       }while(circuit->last_time+44>global_conf.current_time.tv_sec);
+       }while(circuit_primary->last_time+44>global_conf.current_time.tv_sec &&  circuit_secondary->last_time + 88 >global_conf.current_time.tv_sec);
+                   
    }
    return NULL;
 }

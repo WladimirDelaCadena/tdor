@@ -1,8 +1,9 @@
+
 /*
 **  (C) 2008 Camilo Viecco.  All rights reserved.
 **
 **  This file is part of Tdor, and is subject to the license terms in the
-**  LICENSE file, found in the top level directory of this distribution. If you
+ **  LICENSE file, found in the top level directory of this distribution. If you
 **  did not receive the LICENSE file with this file, you may obtain it by
 **  contacting the authors listed above. No part of Tdor, including this file,
 **  may be copied, modified, propagated, or distributed except according to the
@@ -28,12 +29,15 @@ extern conn_db_t conn_db;
 extern stream_db_t stream_db;
 int c_index=0;
 
+
 int initialize_conn_db(conn_db_t *db){
+   fprintf(stderr, "inicializando conn db %i...\n", sizeof(&db));
    db->head=NULL; 
    pthread_mutex_init(&(db->mutex),NULL);
    return 0;
 }
 int initialize_circuit_db(circuit_db_t *db){
+   fprintf(stderr,"inicializando circuit db.. %i,", sizeof(&db));
    db->head=NULL;
    pthread_mutex_init(&(db->mutex),NULL);
 
@@ -50,7 +54,7 @@ or_conn_t *find_or_ins_conn_by_src_dst(conn_db_t *db, uint32_t ip,uint16_t port)
   struct conn_list_element *next;
   int rvalue;
   or_conn_t *r_conn;  
-
+  or_conn_t *r_conn_sec;  
   if (NULL==db){
     return NULL;
   }
@@ -78,8 +82,10 @@ or_conn_t *find_or_ins_conn_by_src_dst(conn_db_t *db, uint32_t ip,uint16_t port)
   if(NULL==next){
      perror("cannot allocate new conn");
      exit(1);
-  } 
+  }
+   
   memset(next,0x00,sizeof(conn_list_element_t)+sizeof(circuit_db_t));
+  //fprintf (stderr, "Econtrando conexion %i,..", ip);
   next->conn.remote_ip=ip;
   next->conn.remote_port=port;
   next->conn.state=CONN_STATE_NEW;
@@ -89,18 +95,14 @@ or_conn_t *find_or_ins_conn_by_src_dst(conn_db_t *db, uint32_t ip,uint16_t port)
   next->conn.crypto_conn.as_link.fd=global_conf.bind_fd;
   next->conn.rsa=NULL;
   next->conn.circuit_db=((char *)next)+sizeof(conn_list_element_t);
+  //fprintf(stderr,"Initializing conn %i",sizeof(conn_list_element_t );
   initialize_circuit_db(next->conn.circuit_db);
   next->conn.last_recv_sec=global_conf.current_time.tv_sec;
   next->next=NULL;
   //set db!
   next->next=db->head;
   db->head=next;
-  if (c_index == 0){
-	db->head_sec = next ; 
-  } 
 
-  fprintf(stderr,"Updating db with ... %i. counter...%i\n",ip,c_index);
-  c_index ++;
   r_conn= &(next->conn);
 end:
   //fprintf(stderr,"done allocating, last_recv=%u,\n",next->conn.last_recv_sec);
@@ -133,9 +135,10 @@ or_conn_t *select_random_inactive_conn(conn_db_t *db, uint32_t current_sec){
   //now all other errors -> goto end!
   db_element=db->head;
   while(db_element!=NULL && num_cons<128){
-
+      
       if(db_element->conn.last_recv_sec+inactive_time<current_sec){
           //add to list
+	  
           conn[num_cons]=&(db_element->conn);
           num_cons++;
       }    
@@ -329,29 +332,26 @@ or_circuit_t *find_or_ins_circ_by_circ_id(circuit_db_t *db,const uint32_t circ_i
 
 ///////////////////////////////////////////////////////////////////////////
 
-or_circuit_t *find_local_circuit(conn_db_t *db, int subc){
+or_circuit_t *find_local_circuit(conn_db_t *db){
+  
   struct conn_list_element *next_conn;
   circuit_db_t *circuit_db;
   struct circuit_list_element *next_circ;
   int rvalue;
-  fprintf(stderr,"Available main circuit with entry %i: \n", db->head->conn.remote_ip);
-  fprintf(stderr,"Available secondary circuit with entry %i \n", db->head_sec->conn.remote_ip);
+  fprintf(stderr,"FINDING local circuit...");
   or_circuit_t *r_circ=NULL;
   if (NULL==db){
     return NULL;
   }
   rvalue=pthread_mutex_lock(&(db->mutex));
   if(0!=rvalue){perror("error on mutex lock, find_local_circuit"); exit(1);};
-  if (subc == 0) {
-  	next_conn=db->head;
-  }
-  if (subc == 1){
-      	next_conn=db->head_sec;
-  }
+  
+  next_conn=db->head;
 
   while(next_conn!=NULL){
     //add another loop!
     circuit_db=(circuit_db_t *)next_conn->conn.circuit_db;
+    //fprintf(stderr,"Available circuits... %i\n", sizeof(circuit_db));
     next_circ=circuit_db->head;
     while(next_circ!=NULL){
        if(next_circ->circuit.local==1){
@@ -378,7 +378,6 @@ end:
 
 int cleanup_circuit_db(circuit_db_t *db){
   struct circuit_list_element *current;
-  struct circuit_list_element *current_sec;
   struct circuit_list_element *to_be_deleted;
   int rvalue=0;
   //or_conn_t *r_conn;
@@ -397,7 +396,7 @@ int cleanup_circuit_db(circuit_db_t *db){
       to_be_deleted=current;
       //clean up stream db if extists
       fprintf(stderr,"about to delete streams\n");
-       delete_streams_for_circ(&stream_db,&(to_be_deleted->circuit));
+      delete_streams_for_circ(&stream_db,&(to_be_deleted->circuit));
       fprintf(stderr,"after deleted streams\n");
 
       //now we remove the related if exist!
@@ -567,9 +566,8 @@ or_stream_t *find_stream_by_circuit_stream_id(stream_db_t *db, const or_circuit_
   head=db->head;
   current=db->head;
   while(current!=NULL){
-    if((circuit   == current->stream.parent_circuit &&
-       stream_id == current->stream.stream_id) || (circuit   == current->stream.secondary_circuit &&
-       stream_id == current->stream.stream_id)  ){
+    if(circuit   == current->stream.parent_circuit &&
+       stream_id == current->stream.stream_id  ){
        //it would be nice to move to front...
        if(NULL!=current->prev){
           //I am not the front so moving makes sense!

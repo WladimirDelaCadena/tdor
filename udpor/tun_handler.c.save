@@ -1,4 +1,4 @@
-\
+
 /*
 **  (C) 2007-2008 Camilo Viecco.  All rights reserved.
 **
@@ -130,7 +130,6 @@ int build_tcp_stream_payload(or_stream_t *stream, unsigned char *inpacket, unsig
    out_header=(stream_header_t *)out;
    or_tcp=(quasi_tcp_header_t*)(out+sizeof(stream_header_t)+q_tcp_offset);
    ip=(struct ip*)inpacket;
-  
    tcp=(struct tcphdr *)(inpacket+ip->ip_hl*4);
  
    //now we copy the tcp header without the options
@@ -318,17 +317,14 @@ int handle_tunnel_packet(tun_t *tun){
    struct icmphdr *icmp_header;
    struct tcphdr *tcp;
    or_stream_t *stream;
-   or_stream_t *stream_sec;
-   or_circuit_t *circuit;
-   or_circuit_t *circuit_sec;   
+   or_circuit_t *circuit;   
    static uint32_t stream_id=0;
-   static uint32_t stream_id_sec=0;
    int rvalue;
    unsigned char buf[MAX_TUN_PACKET];
    unsigned char outbuf[MAX_TUN_PACKET];
    struct in_addr net_addr;
    or_stream_t new_stream;
-   or_stream_t new_stream2;
+
 
    data_len=tun_recv(tun,buf,MAX_TUN_PACKET);
    
@@ -365,22 +361,18 @@ int handle_tunnel_packet(tun_t *tun){
               fprintf(stderr,".\n");
 #endif
               tcp=(struct tcphdr *)(buf+ip_header->ip_hl*4);
-              //search stream primary
-              stream = find_stream_by_ip_port(&stream_db,
+              //search stream
+              stream=find_stream_by_ip_port(&stream_db,
                               ntohl(ip_header->ip_dst.s_addr),
                               ntohl(ip_header->ip_src.s_addr),
                               ntohs(tcp->dest),
                               ntohs(tcp->source), 
                               IP_PROTO_TCP);
-	    
 
               if(NULL==stream){
-                 // find local stream circuits , primary and secondary!
-		 
-                 circuit = find_local_circuit(&conn_db,0);
-   		 circuit_sec = find_local_circuit(&conn_db,1);
-                 fprintf(stderr,"--------------------\n"); 
-		if(circuit!=NULL){
+                 // find local stream circuit!
+                 circuit=find_local_circuit(&conn_db);
+                 f(circuit!=NULL){
                     //clear up
                     memset(&new_stream,0x00,sizeof(or_stream_t));
                     //fill new stream, then collect it from the db!
@@ -391,11 +383,11 @@ int handle_tunnel_packet(tun_t *tun){
                     new_stream.protocol=IP_PROTO_TCP;
                     new_stream.stream_id=stream_id; 
                     new_stream.parent_circuit=circuit;
-                    new_stream.secondary_circuit=circuit_sec;
-                    //index_c++;
+                    fprintf(stderr,"Counter... %i ",index_c);
+                    index_c++;
                     new_stream.seq_add=rand_r((unsigned int *)&circuit->isv_seed)-
                                        ntohl(tcp->seq);
-		    //fprintf(stderr, "Current remote_ip: %i\n" , new_stream.remote_ip); 
+
                     //Now determine if this stream requires transparent
                     // natting!
                     if(0==inet_aton(global_conf.net_addr,&net_addr)){
@@ -424,6 +416,7 @@ int handle_tunnel_packet(tun_t *tun){
 
               //we now scrub the data!
               in_place_tcp_forward_scrub(stream, (char *)tcp);
+
               //if requires proxy,call proxy
               if(OR_STREAM_PROXY_STATE_NONE!=stream->proxy_state){
                  return  tcp_packet_transparent_proxy_handle_forward(stream,ip_header, tcp);    
@@ -434,7 +427,7 @@ int handle_tunnel_packet(tun_t *tun){
               
               //actually should send with the exeption of proxy ready and syn!
               //ignore this for now
-              return circuit_send_stream_payload(stream->parent_circuit, stream->secondary_circuit,outbuf);  
+              return circuit_send_stream_payload(stream->parent_circuit,outbuf);  
              
               //return tun_send_icmp_fail(tun,3,2,buf,data_len);             
               break;

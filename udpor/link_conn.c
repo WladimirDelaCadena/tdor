@@ -272,7 +272,7 @@ int link_send_packet(or_conn_t *conn,unsigned char *packet,uint32_t length){
      return 0;
    }
    conn->last_sent_sec=global_conf.current_time.tv_sec;
-
+   //fprintf(stderr, "I will send using the conn to  %i", conn->remote_ip);
    if ((numbytes = sendto(sockfd, packet, encrypted_len, 0,
              (struct sockaddr *)&their_addr, sizeof(struct sockaddr_in))) == -1) {
         perror("sendto");

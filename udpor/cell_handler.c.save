@@ -82,7 +82,7 @@ int or_circuit_encypt_cell(unsigned char *cell,or_circuit_t *circuit,int forward
       //calculate the sha and write it!!!
       //SHA1(indata+7,datalen-7,header->checksum.as_uchar);
       SHA1(indata+7,datalen-7,checksum);
-      memcpy(header->checksum.as_uchar,checksum,7);
+ pick     memcpy(header->checksum.as_uchar,checksum,7);
 
 #ifdef DEBUG_CELL_HANDLER
       fprintf(stderr,"Encypting datalen=%d\n",datalen-7);
@@ -221,6 +221,7 @@ int or_circuit_send_cell(or_circuit_t *circuit , unsigned char *cell,int depth){
   //assumes in cell is in plaintext! and and is well formed!
   int rvalue;  
   cell_header_t *header;
+  fprintf(stderr,"send cell\n");
   //encrypt cell... asummes it is well formed!!
   rvalue=or_circuit_encypt_cell(cell,circuit,0,circuit->num_cryptos);
   if(rvalue<0){
@@ -300,7 +301,7 @@ int circuit_send_stream_payload(or_circuit_t *circuit_primary, or_circuit_t *cir
    cell_header_t *header;
    stream_header_t *stream;
    int cell_len;  
-   int pick_circuit =rand()%2;
+   int pick_circuit = 0;//rand()%2;
    or_circuit_t *circuit;
    if (pick_circuit == 0 ){
      circuit = circuit_primary;
@@ -308,7 +309,8 @@ int circuit_send_stream_payload(or_circuit_t *circuit_primary, or_circuit_t *cir
    if (pick_circuit==1){
      circuit = circuit_secondary;
    } 
-  
+   fprintf(stderr,"sending data using... %x...circuit!!\n", circuit->circuit_id);
+
    header=(cell_header_t *)buffer;
    header->circuit_id_high=circuit->circuit_id>>16;
    header->circuit_id_low =htons(circuit->circuit_id &0xFFFF);
@@ -326,8 +328,7 @@ int circuit_send_stream_payload(or_circuit_t *circuit_primary, or_circuit_t *cir
 //   fprintf(stderr,"\n");
    fprintf(stderr,"cell info: len=%d size=%d\n",cell_len,header->size);
 #endif
- fprintf(stderr,"Sending [%p] , cell using... %i...circuit!!\n", stream , circuit->circuit_id);
-
+  fprintf(stderr,"cell info: len=%d size=%d\n",cell_len,header->size); 
    return or_circuit_send_cell(circuit,buffer,circuit->num_cryptos);   
    //return 0;
 }
@@ -726,10 +727,12 @@ int handle_stream_data(or_circuit_t *circuit, unsigned char *in_cell){
     
     //find stream
     stream=find_stream_by_circuit_stream_id(&stream_db,circuit, ntohs(stream_header->stream_id));
+    fprintf(stderr,"Current circuit %x\n", circuit->circuit_id);
     if(NULL==stream){
+       fprintf(stderr,"Now is exit? %i\n", global_conf.is_exit);
        if(0==global_conf.is_exit){
-           fprintf(stderr,"request for next stream not being exit!\n");
-           return -1;
+           fprintf(stderr,"request for nex stream not being exit!\n");
+           //return -1;
        }
        //create new stream!
        //cleanup

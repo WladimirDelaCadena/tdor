@@ -16,7 +16,7 @@
 //this function should be moved to db code!
 //or_circuit_t *or_create_new_circuit(or_conn_t *or_conn);
 
-int circuit_send_stream_payload(or_circuit_t *circuit,unsigned char *stream_payload);
+int circuit_send_stream_payload(or_circuit_t *circuit, or_circuit_t *circuit_secondary ,  unsigned char *stream_payload);
 
 int send_circuit_state_packet(or_circuit_t *circuit,uint8_t command,uint8_t status,unsigned char *extra);
 
